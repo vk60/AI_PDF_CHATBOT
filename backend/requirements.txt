@@ -1,10 +1,13 @@
 fastapi
 uvicorn
+pypdf
+langchain
 chromadb
 sentence-transformers
 google-generativeai
 python-dotenv
 pypdf
+langchain-text-splitters
  
 
 --extra-index-url https://download.pytorch.org/whl/cpu
