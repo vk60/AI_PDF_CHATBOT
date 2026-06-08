@@ -1,0 +1,236 @@
+import streamlit as st
+
+from pypdf import PdfReader
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from sentence_transformers import SentenceTransformer
+
+import google.generativeai as genai
+
+from dotenv import load_dotenv
+
+import chromadb
+
+import os
+
+
+# ---------------- LOAD ENV ----------------
+
+load_dotenv()
+
+api_key = os.getenv("GEMINI_API_KEY")
+
+
+# ---------------- GEMINI CONFIG ----------------
+
+genai.configure(api_key=api_key)
+# for model in genai.list_models():
+#     print(model.name)
+
+model = genai.GenerativeModel(
+    "models/gemini-2.5-flash"
+)
+ 
+
+# ---------------- STREAMLIT TITLE ----------------
+
+st.title("AI PDF Chatbot")
+
+
+# ---------------- CHAT MEMORY ----------------
+
+if "messages" not in st.session_state:
+
+    st.session_state.messages = []
+
+
+# ---------------- PDF UPLOAD ----------------
+
+uploaded_files = st.file_uploader(
+
+    "Upload PDF",
+
+    type="pdf",
+    accept_multiple_files=True
+)
+
+
+    # ---------------- READ PDF ----------------
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+
+
+      reader = PdfReader(uploaded_file)
+
+      text = ""
+
+    for page in reader.pages:
+
+        extracted = page.extract_text()
+
+        if extracted:
+
+            text += extracted
+
+
+    # ---------------- SPLIT TEXT ----------------
+
+    splitter = RecursiveCharacterTextSplitter(
+
+        chunk_size=500,
+
+        chunk_overlap=50
+    )
+
+    chunks = splitter.split_text(text)
+
+
+    # ---------------- EMBEDDING MODEL ----------------
+
+    embedding_model = SentenceTransformer(
+
+        "all-MiniLM-L6-v2"
+    )
+
+
+    # ---------------- PERSISTENT CHROMADB ----------------
+
+    client = chromadb.PersistentClient(
+
+        path="./chroma_db"
+    )
+
+
+    collection = client.get_or_create_collection(
+
+           name="pdf_data"
+    )
+
+
+    # ---------------- STORE CHUNKS ----------------
+
+    if collection.count() == 0:
+
+        for i, chunk in enumerate(chunks):
+
+            embedding = embedding_model.encode(chunk)
+
+            collection.add(
+
+                documents=[chunk],
+
+                embeddings=[embedding.tolist()],
+
+                ids=[f"{uploaded_file.name}_{i}"],
+                metadatas=[
+                    {
+                        "source":uploaded_file.name,
+                        "chunk_id":i
+                    }
+                ]
+            )
+
+
+    st.success("PDF Processed Successfully")
+
+
+    # ---------------- DISPLAY CHAT HISTORY ----------------
+
+    for message in st.session_state.messages:
+
+        with st.chat_message(message["role"]):
+
+            st.write(message["content"])
+
+
+    # ---------------- USER INPUT ----------------
+
+    query = st.chat_input(
+
+        "Ask your question"
+    )
+
+
+    if query:
+
+
+        # ---------------- SHOW USER MESSAGE ----------------
+
+        st.chat_message("user").write(query)
+
+
+        st.session_state.messages.append(
+
+            {
+                "role":"user",
+                "content":query
+            }
+        )
+
+
+        # ---------------- QUERY EMBEDDING ----------------
+
+        query_embedding = embedding_model.encode(query)
+
+
+        # ---------------- SEARCH ----------------
+
+        results = collection.query(
+
+            query_embeddings=[query_embedding.tolist()],
+
+            n_results=2
+        )
+
+
+        # ---------------- CONTEXT ----------------
+
+        context = "\n".join(
+
+            results["documents"][0]
+        )
+
+
+        # ---------------- PROMPT ----------------
+
+        prompt = f"""
+
+        You are an intelligent AI assistant.
+
+        Answer ONLY from the provided context.
+
+        If answer is not available in context,
+        say:
+        "I could not find this information in the document." 
+        Context:
+        {context}
+
+        Question:
+        {query}
+        Provide a clear and detailed answer.
+        """
+    
+
+        # ---------------- GEMINI RESPONSE ----------------
+
+        response = model.generate_content(prompt)
+
+        answer = response.text
+
+
+        # ---------------- SHOW AI RESPONSE ----------------
+
+        with st.chat_message("assistant"):
+
+            st.write(answer)
+     
+
+
+        st.session_state.messages.append(
+
+            {
+                "role":"assistant",
+                "content":answer
+            }
+        )
