@@ -6,6 +6,7 @@ chromadb
 sentence-transformers
 google-generativeai
 python-dotenv
+python-multipart
 pypdf
 langchain-text-splitters
  
