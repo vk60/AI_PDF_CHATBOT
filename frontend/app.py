@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-# -------- CONFIG --------
+# -------- PAGE CONFIG --------
 
 st.set_page_config(
     page_title="AI PDF Chatbot",
@@ -12,15 +12,15 @@ st.title("📄 AI PDF Chatbot")
 
 # -------- BACKEND URL --------
 
-BACKEND_URL = "http://127.0.0.1:8000"
+BACKEND_URL = "https://ai-pdf-chatbot-npmd.onrender.com"
 
-# AFTER DEPLOYMENT:
-# BACKEND_URL = "https://your-backend.onrender.com"
-
-# -------- SESSION --------
+# -------- SESSION STATE --------
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "pdf_uploaded" not in st.session_state:
+    st.session_state.pdf_uploaded = False
 
 # -------- PDF UPLOAD --------
 
@@ -29,46 +29,73 @@ uploaded_file = st.file_uploader(
     type="pdf"
 )
 
-if uploaded_file:
+# -------- UPLOAD BUTTON --------
 
-    files = {
-        "file": uploaded_file
-    }
+if uploaded_file and not st.session_state.pdf_uploaded:
 
-    with st.spinner("Uploading PDF..."):
+    if st.button("Upload PDF"):
 
-        response = requests.post(
-            f"{BACKEND_URL}/upload-pdf",
-            files=files
-        )
+        files = {
+            "file": uploaded_file
+        }
 
-    if response.status_code == 200:
+        try:
 
-        st.success(
-            "PDF uploaded successfully"
-        )
+            with st.spinner("Uploading PDF... Please wait"):
+
+                response = requests.post(
+                    f"{BACKEND_URL}/upload-pdf",
+                    files=files,
+                    timeout=300
+                )
+
+            if response.status_code == 200:
+
+                st.success("PDF uploaded successfully ✅")
+
+                st.session_state.pdf_uploaded = True
+
+            else:
+
+                st.error(
+                    f"Upload failed: {response.text}"
+                )
+
+        except requests.exceptions.ConnectionError:
+
+            st.error(
+                "Cannot connect to backend server."
+            )
+
+        except requests.exceptions.Timeout:
+
+            st.error(
+                "Request timeout. Backend may be sleeping."
+            )
+
+        except Exception as e:
+
+            st.error(str(e))
 
 # -------- CHAT HISTORY --------
 
 for message in st.session_state.messages:
 
-    with st.chat_message(
-        message["role"]
-    ):
+    with st.chat_message(message["role"]):
 
-        st.markdown(
-            message["content"]
-        )
+        st.markdown(message["content"])
 
-# -------- USER INPUT --------
+# -------- CHAT INPUT --------
 
 question = st.chat_input(
     "Ask anything from PDF..."
 )
 
+# -------- ASK QUESTION --------
+
 if question:
 
-    # USER MESSAGE
+    # ----- USER MESSAGE -----
 
     st.session_state.messages.append({
         "role": "user",
@@ -79,7 +106,7 @@ if question:
 
         st.markdown(question)
 
-    # ASSISTANT MESSAGE
+    # ----- ASSISTANT RESPONSE -----
 
     with st.chat_message("assistant"):
 
@@ -87,31 +114,52 @@ if question:
 
         full_response = ""
 
-        response = requests.post(
-            f"{BACKEND_URL}/ask",
-            json={
-                "question": question
-            },
-            stream=True
-        )
+        try:
 
-        for chunk in response.iter_content(
-            chunk_size=1024
-        ):
+            response = requests.post(
+                f"{BACKEND_URL}/ask",
+                json={
+                    "question": question
+                },
+                stream=True,
+                timeout=300
+            )
 
-            if chunk:
+            for chunk in response.iter_content(
+                chunk_size=1024
+            ):
 
-                text = chunk.decode("utf-8")
+                if chunk:
 
-                full_response += text
+                    text = chunk.decode("utf-8")
 
-                answer_placeholder.markdown(
-                    full_response + "▌"
-                )
+                    full_response += text
 
-        answer_placeholder.markdown(
-            full_response
-        )
+                    answer_placeholder.markdown(
+                        full_response + "▌"
+                    )
+
+            answer_placeholder.markdown(
+                full_response
+            )
+
+        except requests.exceptions.ConnectionError:
+
+            st.error(
+                "Cannot connect to backend."
+            )
+
+        except requests.exceptions.Timeout:
+
+            st.error(
+                "Backend timeout. Please retry."
+            )
+
+        except Exception as e:
+
+            st.error(str(e))
+
+    # ----- SAVE CHAT HISTORY -----
 
     st.session_state.messages.append({
         "role": "assistant",
